@@ -86,34 +86,44 @@ if audio_source:
     if hasattr(audio_source, "name") and audio_source.name:
         suffix = Path(audio_source.name).suffix or ".wav"
 
-    audio_bytes = audio_source.read()
+    if hasattr(audio_source, "getvalue"):
+        audio_bytes = audio_source.getvalue()
+    else:
+        if hasattr(audio_source, "seek"):
+            audio_source.seek(0)
+        audio_bytes = audio_source.read()
 
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-        f.write(audio_bytes)
-        tmp_path = f.name
+    audio_key = hash(audio_bytes)
 
-    try:
-        st.caption("Original audio")
-        st.audio(audio_bytes)
+    st.caption("Original audio")
+    st.audio(audio_bytes)
 
-        with st.spinner("Transcribing with Whisper Small..."):
-            transcript = transcribe(tmp_path)
+    if st.session_state.get("audio_key") != audio_key:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(audio_bytes)
+            tmp_path = f.name
+        try:
+            with st.spinner("Transcribing with Whisper Small..."):
+                st.session_state.transcript = transcribe(tmp_path)
+            st.session_state.audio_key = audio_key
+        finally:
+            os.unlink(tmp_path)
 
-        st.subheader("Transcription")
-        transcript = st.text_area("Edit if needed:", value=transcript, height=100)
+    st.subheader("Transcription")
+    transcript = st.text_area(
+        "Edit if needed:", value=st.session_state.transcript, height=100
+    )
 
-        if st.button("Translate & Synthesize", type="primary"):
-            with st.spinner("Translating with mBART-51..."):
-                translation = translate(transcript)
+    if st.button("Translate & Synthesize", type="primary"):
+        with st.spinner("Translating with mBART-51..."):
+            translation = translate(transcript)
 
-            st.subheader("Translation")
-            st.write(translation)
+        st.subheader("Translation")
+        st.write(translation)
 
-            with st.spinner("Synthesizing with Kokoro TTS..."):
-                audio_buf = synthesize(translation, voice)
+        with st.spinner("Synthesizing with Kokoro TTS..."):
+            audio_buf = synthesize(translation, voice)
 
-            st.subheader("Translated Audio")
-            st.audio(audio_buf, format="audio/wav")
-            st.download_button("Download WAV", audio_buf, "translation.wav", "audio/wav")
-    finally:
-        os.unlink(tmp_path)
+        st.subheader("Translated Audio")
+        st.audio(audio_buf, format="audio/wav")
+        st.download_button("Download WAV", audio_buf, "translation.wav", "audio/wav")
