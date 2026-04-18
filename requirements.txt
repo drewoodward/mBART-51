@@ -1,0 +1,8 @@
+streamlit>=1.31.0
+openai-whisper
+torch
+transformers<5
+sentencepiece
+numpy<2
+soundfile
+kokoro>=0.9.2
