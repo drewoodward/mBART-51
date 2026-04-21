@@ -7,9 +7,16 @@ import numpy as np
 import soundfile as sf
 import streamlit as st
 import torch
-import whisper
-from transformers import MBart50TokenizerFast, MBartForConditionalGeneration
+from transformers import (
+    MBart50TokenizerFast,
+    MBartForConditionalGeneration,
+    WhisperForConditionalGeneration,
+    WhisperProcessor,
+    pipeline,
+)
 
+WHISPER_MODEL_ID = "drewoodward/whisper-small-spanglish"
+WHISPER_BASE_ID = "openai/whisper-small"
 MBART_MODEL_ID = "drewoodward/mBART-51"
 TTS_VOICES = ["af_heart", "af_bella", "af_nicole", "am_adam", "am_michael", "bf_emma", "bm_george"]
 
@@ -18,7 +25,17 @@ st.set_page_config(page_title="mBART-51 Translator", layout="centered")
 
 @st.cache_resource
 def load_whisper_model():
-    return whisper.load_model("small")
+    device = 0 if torch.cuda.is_available() else -1
+    processor = WhisperProcessor.from_pretrained(WHISPER_BASE_ID)
+    model = WhisperForConditionalGeneration.from_pretrained(WHISPER_MODEL_ID)
+    return pipeline(
+        "automatic-speech-recognition",
+        model=model,
+        tokenizer=processor.tokenizer,
+        feature_extractor=processor.feature_extractor,
+        device=device,
+        chunk_length_s=30,
+    )
 
 
 @st.cache_resource
@@ -36,8 +53,8 @@ def load_tts():
 
 
 def transcribe(audio_path: str) -> str:
-    result = load_whisper_model().transcribe(audio_path, fp16=False)
-    return result["text"]
+    asr = load_whisper_model()
+    return asr(audio_path)["text"]
 
 
 def translate(text: str) -> str:
@@ -67,7 +84,7 @@ def synthesize(text: str, voice: str) -> io.BytesIO:
 # --- UI ---
 
 st.title("mBART-51 Translator")
-st.caption("Whisper Small → mBART-51 → Kokoro TTS | Accent & code-switching aware")
+st.caption("Whisper Small (Spanglish-tuned) → mBART-51 → Kokoro TTS | Accent & code-switching aware")
 
 input_method = st.radio("Audio input", ["Upload file", "Record"], horizontal=True)
 
