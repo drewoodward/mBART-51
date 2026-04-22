@@ -23,27 +23,60 @@ TTS_VOICES = ["af_heart", "af_bella", "af_nicole", "am_adam", "am_michael", "bf_
 st.set_page_config(page_title="mBART-51 Translator", layout="centered")
 
 
+def _pick_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _pick_dtype(device: str) -> torch.dtype:
+    return torch.float16 if device in ("cuda", "mps") else torch.float32
+
+
 @st.cache_resource
 def load_whisper_model():
-    device = 0 if torch.cuda.is_available() else -1
+    device = _pick_device()
+    dtype = _pick_dtype(device)
     processor = WhisperProcessor.from_pretrained(WHISPER_BASE_ID)
-    model = WhisperForConditionalGeneration.from_pretrained(WHISPER_MODEL_ID)
-    return pipeline(
+    model = WhisperForConditionalGeneration.from_pretrained(
+        WHISPER_MODEL_ID, torch_dtype=dtype
+    )
+    asr = pipeline(
         "automatic-speech-recognition",
         model=model,
         tokenizer=processor.tokenizer,
         feature_extractor=processor.feature_extractor,
-        device=device,
+        device=torch.device(device),
+        torch_dtype=dtype,
         chunk_length_s=30,
+        batch_size=8,
     )
+    asr(np.zeros(16000, dtype=np.float32))
+    return asr
 
 
 @st.cache_resource
 def load_mbart():
+    device = _pick_device()
+    dtype = _pick_dtype(device)
     tokenizer = MBart50TokenizerFast.from_pretrained(MBART_MODEL_ID)
-    model = MBartForConditionalGeneration.from_pretrained(MBART_MODEL_ID)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    return tokenizer, model.to(device).eval(), device
+    model = (
+        MBartForConditionalGeneration.from_pretrained(MBART_MODEL_ID, torch_dtype=dtype)
+        .to(device)
+        .eval()
+    )
+    tokenizer.src_lang = "es_XX"
+    warm = tokenizer("hola", return_tensors="pt").to(device)
+    with torch.no_grad():
+        model.generate(
+            **warm,
+            forced_bos_token_id=tokenizer.lang_code_to_id["en_XX"],
+            max_length=8,
+            num_beams=1,
+        )
+    return tokenizer, model, device
 
 
 @st.cache_resource
@@ -66,7 +99,7 @@ def translate(text: str) -> str:
             **inputs,
             forced_bos_token_id=tokenizer.lang_code_to_id["en_XX"],
             max_length=512,
-            num_beams=4,
+            num_beams=1,
         )
     return tokenizer.batch_decode(tokens, skip_special_tokens=True)[0]
 
